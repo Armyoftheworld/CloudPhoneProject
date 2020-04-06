@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+option java_package = "com.army.scrcpy.server";
+option java_outer_classname = "ControlMessageProto";
+
+// protoc --js_out=import_style=commonjs,binary:. controlMessage.proto
+// 再生成的文件第一行添加 /* eslint-disable */
+
+message ControlMessage {
+    int32 type = 1;
+    int32 action = 2;
+    string text = 3;
+    int32 metaState = 4;
+    int32 keycode = 5;
+    int32 buttons = 6;
+    int64 pointerId = 7;
+    float pressure = 8;
+    int32 x = 9;
+    int32 y = 10;
+    int32 width = 11;
+    int32 height = 12;
+    int32 hScroll = 13;
+    int32 vScroll = 14;
+}
