@@ -13,7 +13,17 @@ public class AppServerHandler extends SimpleChannelInboundHandler<ByteBuf> {
     public void channelRead0(ChannelHandlerContext ctx, ByteBuf byteBuf) throws Exception {
         String addr = ctx.channel().localAddress().toString();
         byte type = byteBuf.readByte();
-        Server.writeWebSocket(addr, Unpooled.copiedBuffer(byteBuf), type == SocketConstants.VIDEOSTREAM_TYPE);
+        if (type == SocketConstants.CONTROLMSG_TYPE) {
+            Server.writeWebSocket(addr, Unpooled.copiedBuffer(byteBuf), false);
+            return;
+        }
+        if (type == SocketConstants.VIDEOSTREAM_TYPE) {
+            int pts = (int) byteBuf.readLong();
+            byte[] frame = new byte[byteBuf.readableBytes()];
+            byteBuf.readBytes(frame);
+            System.out.println("pts = " + pts);
+            PushStreamTools.pushRawStream(frame, pts, frame.length);
+        }
     }
 
     @Override

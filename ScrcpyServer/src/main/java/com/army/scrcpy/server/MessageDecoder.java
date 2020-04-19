@@ -50,31 +50,49 @@ public class MessageDecoder extends ByteToMessageDecoder {
             }
         }
 
+        if (buffer.readableBytes() == 0) {
+            buffer.readerIndex(beginReader);
+            return;
+        }
         byte type = buffer.readByte();
 
+
         if (type == SocketConstants.CONTROLMSG_TYPE) {
-            wrapAppDataToWeb(buffer, out, beginReader, type);
+            if (buffer.readableBytes() < 4) {
+                buffer.readerIndex(beginReader);
+                return;
+            }
+            int length = buffer.readInt();
+            if (buffer.readableBytes() < length) {
+                buffer.readerIndex(beginReader);
+            } else {
+                ByteBuf byteBuf = Unpooled.buffer(1 + length);
+                byteBuf.writeByte(type);
+                byteBuf.writeBytes(buffer, length);
+                out.add(byteBuf);
+            }
             return;
         }
 
         if (type == SocketConstants.VIDEOSTREAM_TYPE) {
-            buffer.skipBytes(8);
-            wrapAppDataToWeb(buffer, out, beginReader, type);
+            if (buffer.readableBytes() < 8 + 4) {
+                buffer.readerIndex(beginReader);
+                return;
+            }
+            long pts = buffer.readLong();
+            int length = buffer.readInt();
+            if (buffer.readableBytes() < length) {
+                buffer.readerIndex(beginReader);
+            } else {
+                ByteBuf byteBuf = Unpooled.buffer(1 + 8 + length);
+                byteBuf.writeByte(type);
+                byteBuf.writeLong(pts);
+                byteBuf.writeBytes(buffer, length);
+                out.add(byteBuf);
+            }
             return;
         }
 
         buffer.readerIndex(beginReader);
-    }
-
-    private void wrapAppDataToWeb(ByteBuf buffer, List<Object> out, int beginReader, byte type) {
-        int length = buffer.readInt();
-        if (buffer.readableBytes() < length) {
-            buffer.readerIndex(beginReader);
-        } else {
-            ByteBuf byteBuf = Unpooled.buffer(1 + length);
-            byteBuf.writeByte(type);
-            byteBuf.writeBytes(buffer, length);
-            out.add(byteBuf);
-        }
     }
 }

@@ -25,11 +25,14 @@ public class Server {
 
     public static Map<String, SocketChannelData> repositoryMap = new HashMap<>(16);
     public static Map<String, String> addrMap = new HashMap<>(16);
+    public static final String RTMPURL = "rtmp://10.211.55.6:1935/myapp/phone";
 
     public static void main(String[] args) {
         try {
-            startWebSocketServer();
-//            prepareConnectPhone();
+//            startWebSocketServer();
+            int ret = PushStreamTools.initRtmp(RTMPURL);
+            System.out.println("ret = " + ret);
+            prepareConnectPhone("local");
         } catch (Exception e) {
             e.printStackTrace();
         }

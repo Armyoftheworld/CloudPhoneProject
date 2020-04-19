@@ -153,7 +153,7 @@ public class ScreenEncoder implements Device.RotationListener {
         }
         headerBuffer.putShort(SocketConstants.DATA_BEGIN);
         headerBuffer.put(SocketConstants.VIDEOSTREAM_TYPE);
-        headerBuffer.putLong(pts);
+        headerBuffer.putLong(pts / 1000L);
         headerBuffer.putInt(packetSize);
         headerBuffer.flip();
         IO.writeFully(fd, headerBuffer);
