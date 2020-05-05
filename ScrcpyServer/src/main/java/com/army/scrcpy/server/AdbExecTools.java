@@ -39,13 +39,13 @@ public class AdbExecTools {
     public static Future<ProcessResult> adbProcess(boolean isForward) {
         return doCommandInBackground("adb", "shell", "CLASSPATH=" + DEVICE_SERVER_PATH,
                 "app_process", "/", "com.genymobile.scrcpy.Server",
-                "1.12.1", "0", "8000000", "0", isForward ? "true" : "false", "-", "true", "true");
+                "1.12.1", "880", "8000000", "0", isForward ? "true" : "false", "-", "true", "true");
     }
 
     public static void adbProcess2(boolean isForward) {
         doCommand("adb", "shell", "CLASSPATH=" + DEVICE_SERVER_PATH,
                 "app_process", "/", "com.genymobile.scrcpy.Server",
-                "1.12.1", "0", "8000000", "0", isForward ? "true" : "false", "-", "true", "true");
+                "1.12.1", "880", "8000000", "0", isForward ? "true" : "false", "-", "true", "true");
     }
 
     private static boolean isSuccess(List<String> results) {

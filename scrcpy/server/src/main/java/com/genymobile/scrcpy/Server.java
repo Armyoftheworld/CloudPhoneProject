@@ -85,7 +85,7 @@ public final class Server {
 
         Options options = new Options();
 
-        int maxSize = Integer.parseInt(args[1]) & ~7; // multiple of 8
+        int maxSize = Integer.parseInt(args[1]) & ~15; // multiple of 8
         options.setMaxSize(maxSize);
 
         int bitRate = Integer.parseInt(args[2]);

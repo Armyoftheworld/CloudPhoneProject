@@ -5,6 +5,8 @@ import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
 import android.os.Build;
+import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.IBinder;
 import android.view.Surface;
 import com.genymobile.scrcpy.wrappers.SurfaceControl;
@@ -12,13 +14,16 @@ import com.genymobile.scrcpy.wrappers.SurfaceControl;
 import java.io.FileDescriptor;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-public class ScreenEncoder implements Device.RotationListener {
+/**
+ * mediacodec异步解码有问题，放弃
+ */
+public class ScreenEncoderAsyncDecoder extends MediaCodec.Callback implements Device.RotationListener {
 
     private static final int DEFAULT_I_FRAME_INTERVAL = 10; // seconds
     private static final int REPEAT_FRAME_DELAY_US = 100_000; // repeat after 100ms
-    private static final long DECODER_WAIT_TIME_US = 5_000;
 
     private static final int NO_PTS = -1;
 
@@ -30,15 +35,19 @@ public class ScreenEncoder implements Device.RotationListener {
     private int iFrameInterval;
     private boolean sendFrameMeta;
     private long ptsOrigin;
+    private FileDescriptor fd;
+    private boolean decoderStarted = false;
 
-    public ScreenEncoder(boolean sendFrameMeta, int bitRate, int maxFps, int iFrameInterval) {
+    private final static ArrayBlockingQueue<byte []> mInputDatasQueue = new ArrayBlockingQueue<>(32);
+
+    public ScreenEncoderAsyncDecoder(boolean sendFrameMeta, int bitRate, int maxFps, int iFrameInterval) {
         this.sendFrameMeta = sendFrameMeta;
         this.bitRate = bitRate;
         this.maxFps = maxFps;
         this.iFrameInterval = iFrameInterval;
     }
 
-    public ScreenEncoder(boolean sendFrameMeta, int bitRate, int maxFps) {
+    public ScreenEncoderAsyncDecoder(boolean sendFrameMeta, int bitRate, int maxFps) {
         this(sendFrameMeta, bitRate, maxFps, DEFAULT_I_FRAME_INTERVAL);
     }
 
@@ -52,13 +61,16 @@ public class ScreenEncoder implements Device.RotationListener {
     }
 
     public void streamScreen(Device device, FileDescriptor fd) throws IOException {
+        this.fd = fd;
         Workarounds.prepareMainLooper();
         Workarounds.fillAppInfo();
 
         MediaFormat encoderFormat = createEncoderFormat(bitRate, maxFps, iFrameInterval);
         MediaFormat decoderFormat = createDecoderFormat();
+        HandlerThread videoDecoderThread = new HandlerThread("VideoDecoder");
+        videoDecoderThread.start();
+        Handler mVideoDecoderHandler = new Handler(videoDecoderThread.getLooper());
         device.setRotationListener(this);
-        boolean canSetProfile = true;
         boolean alive;
         try {
             do {
@@ -70,13 +82,17 @@ public class ScreenEncoder implements Device.RotationListener {
                 setSize(encoderFormat, videoRect.width(), videoRect.height());
                 setSize(decoderFormat, videoRect.width(), videoRect.height());
                 configureCoder(encoder, encoderFormat, true);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    decoder.setCallback(this, mVideoDecoderHandler);
+                } else {
+                    decoder.setCallback(this);
+                }
                 configureCoder(decoder, decoderFormat, false);
                 Surface surface = encoder.createInputSurface();
                 setDisplaySurface(display, surface, contentRect, videoRect);
                 encoder.start();
-                decoder.start();
                 try {
-                    alive = encodeAndDecoder(encoder, fd, decoder);
+                    alive = encodeAndDecoder(encoder, decoder);
                     // do not call stop() on exception, it would trigger an IllegalStateException
                     encoder.stop();
                     decoder.stop();
@@ -92,10 +108,9 @@ public class ScreenEncoder implements Device.RotationListener {
         }
     }
 
-    private boolean encodeAndDecoder(MediaCodec codec, FileDescriptor fd, MediaCodec decoder) throws IOException {
+    private boolean encodeAndDecoder(MediaCodec codec, MediaCodec decoder) throws IOException {
         boolean eof = false;
         MediaCodec.BufferInfo encoderInfo = new MediaCodec.BufferInfo();
-        MediaCodec.BufferInfo decoderInfo = new MediaCodec.BufferInfo();
 
         while (!consumeRotationChange() && !eof) {
             int outputBufferId = codec.dequeueOutputBuffer(encoderInfo, -1);
@@ -105,9 +120,15 @@ public class ScreenEncoder implements Device.RotationListener {
                     // must restart encoding with new size
                     break;
                 }
+                if (!decoderStarted) {
+                    decoderStarted = true;
+                    decoder.start();
+                }
                 if (outputBufferId >= 0) {
                     ByteBuffer codecBuffer = codec.getOutputBuffer(outputBufferId);
-                    decodeBuffer(decoder, codecBuffer, decoderInfo, fd, encoderInfo);
+                    byte[] data = new byte[codecBuffer.remaining()];
+                    codecBuffer.get(data);
+                    mInputDatasQueue.offer(data);
                 }
             } finally {
                 if (outputBufferId >= 0) {
@@ -118,60 +139,15 @@ public class ScreenEncoder implements Device.RotationListener {
 
         return !eof;
     }
-
-    private void decodeBuffer(MediaCodec decoder, ByteBuffer codecBuffer, MediaCodec.BufferInfo decoderInfo,
-                              FileDescriptor fd, MediaCodec.BufferInfo encoderInfo) throws IOException {
-        int inputBufferIndex = decoder.dequeueInputBuffer(-1);
-        if (inputBufferIndex >= 0) {
-            ByteBuffer inputBuffer = decoder.getInputBuffer(inputBufferIndex);
-            if (inputBuffer != null) {
-                inputBuffer.clear();
-                int length = codecBuffer.remaining();
-                inputBuffer.put(codecBuffer);
-                decoder.queueInputBuffer(inputBufferIndex, 0, length, getPts(encoderInfo), 0);
-            }
-        }
-        int outputBufferIndex = decoder.dequeueOutputBuffer(decoderInfo, DECODER_WAIT_TIME_US);
-        while (outputBufferIndex >= 0) {
-            ByteBuffer outputBuffer = decoder.getOutputBuffer(outputBufferIndex);
-            if (outputBuffer != null) {
-                outputBuffer.position(0);
-                outputBuffer.limit(decoderInfo.offset + decoderInfo.size);
-
-                if (sendFrameMeta) {
-                    writeFrameMeta(fd, encoderInfo, outputBuffer.remaining(), decoder.getOutputFormat());
-                }
-
-                IO.writeFully(fd, outputBuffer);
-                decoder.releaseOutputBuffer(outputBufferIndex, false);
-                outputBuffer.clear();
-            }
-            outputBufferIndex = decoder.dequeueOutputBuffer(decoderInfo, DECODER_WAIT_TIME_US);
-        }
-    }
-
-    private long getPts(MediaCodec.BufferInfo bufferInfo) {
-        long pts;
-        if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
-            pts = NO_PTS; // non-media data packet
-        } else {
-            if (ptsOrigin == 0) {
-                ptsOrigin = bufferInfo.presentationTimeUs;
-            }
-            pts = bufferInfo.presentationTimeUs - ptsOrigin;
-        }
-        return pts;
-    }
-
-    private void writeFrameMeta(FileDescriptor fd, MediaCodec.BufferInfo bufferInfo, int packetSize, MediaFormat format) throws IOException {
+    private void writeFrameMeta(FileDescriptor fd, int packetSize, MediaFormat format) throws IOException {
         headerBuffer.clear();
 
         headerBuffer.putShort(SocketConstants.DATA_BEGIN);
         headerBuffer.put(SocketConstants.VIDEOSTREAM_TYPE);
         // 把下面的三个值的长度也算进去
         headerBuffer.putInt(packetSize + 8 + 1 + 4);
-        headerBuffer.putLong(getPts(bufferInfo));
-        headerBuffer.put((byte) format.getInteger(MediaFormat.KEY_COLOR_FORMAT));
+        headerBuffer.putLong(0);
+        headerBuffer.put((byte)format.getInteger(MediaFormat.KEY_COLOR_FORMAT));
         int width = format.getInteger(MediaFormat.KEY_WIDTH);
         int height = format.getInteger(MediaFormat.KEY_HEIGHT);
         headerBuffer.putInt(width * height);
@@ -217,7 +193,7 @@ public class ScreenEncoder implements Device.RotationListener {
         format.setString(MediaFormat.KEY_MIME, MediaFormat.MIMETYPE_VIDEO_AVC);
         format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible);
         return format;
-    }
+}
 
     private static IBinder createDisplay() {
         return SurfaceControl.createDisplay("scrcpy", true);
@@ -245,5 +221,52 @@ public class ScreenEncoder implements Device.RotationListener {
 
     private static void destroyDisplay(IBinder display) {
         SurfaceControl.destroyDisplay(display);
+    }
+
+    @Override
+    public void onInputBufferAvailable(MediaCodec codec, int index) {
+        Ln.d("-----------------------onInputBufferAvailable-----------------------");
+        Ln.d("mInputDatasQueue.size() = " + mInputDatasQueue.size());
+        if (mInputDatasQueue.isEmpty()) {
+            return;
+        }
+        ByteBuffer inputBuffer = codec.getInputBuffer(index);
+        if (inputBuffer == null) {
+            codec.queueInputBuffer(index,0, 0,0,0);
+            return;
+        }
+        inputBuffer.clear();
+        byte[] bytes = mInputDatasQueue.poll();
+        inputBuffer.put(bytes);
+        codec.queueInputBuffer(index,0, bytes.length,0,0);
+    }
+
+    @Override
+    public void onOutputBufferAvailable(MediaCodec codec, int index, MediaCodec.BufferInfo info) {
+        Ln.d("-----------------------onOutputBufferAvailable-----------------------");
+        try {
+            ByteBuffer outputBuffer = codec.getOutputBuffer(index);
+            if (outputBuffer != null && info != null && info.size > 0) {
+                if (sendFrameMeta) {
+                    writeFrameMeta(fd, outputBuffer.remaining(), codec.getOutputFormat(index));
+                }
+                IO.writeFully(fd, outputBuffer);
+                outputBuffer.clear();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            codec.releaseOutputBuffer(index, false);
+        }
+    }
+
+    @Override
+    public void onError(MediaCodec codec, MediaCodec.CodecException e) {
+        Ln.d(String.format("diagnosticInfo = %s, isRecoverable = %b", e.getDiagnosticInfo(), e.isRecoverable()));
+    }
+
+    @Override
+    public void onOutputFormatChanged(MediaCodec codec, MediaFormat format) {
+
     }
 }

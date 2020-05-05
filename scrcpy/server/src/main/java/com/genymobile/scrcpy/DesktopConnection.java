@@ -132,7 +132,7 @@ public final class DesktopConnection implements Closeable {
             reader.readFrom(controlInputStream);
             msg = reader.newNext();
         }
-        Ln.d("msg.getType() = " + msg.getType());
+//        Ln.d("msg.getType() = " + msg.getType());
         return msg;
     }
 

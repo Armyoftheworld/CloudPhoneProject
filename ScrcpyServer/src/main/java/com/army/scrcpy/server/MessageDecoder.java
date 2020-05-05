@@ -1,6 +1,5 @@
 package com.army.scrcpy.server;
 
-import com.sun.org.apache.bcel.internal.classfile.ConstantValue;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
@@ -52,13 +51,8 @@ public class MessageDecoder extends ByteToMessageDecoder {
 
         byte type = buffer.readByte();
 
-        if (type == SocketConstants.CONTROLMSG_TYPE) {
-            wrapAppDataToWeb(buffer, out, beginReader, type);
-            return;
-        }
-
-        if (type == SocketConstants.VIDEOSTREAM_TYPE) {
-            buffer.skipBytes(8);
+        if (buffer.readableBytes() >= 4 &&
+                (type == SocketConstants.CONTROLMSG_TYPE || type == SocketConstants.VIDEOSTREAM_TYPE)) {
             wrapAppDataToWeb(buffer, out, beginReader, type);
             return;
         }

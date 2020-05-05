@@ -3,6 +3,7 @@ package com.army.scrcpy.server;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
@@ -29,7 +30,7 @@ public class Server {
     public static void main(String[] args) {
         try {
             startWebSocketServer();
-//            prepareConnectPhone();
+//            prepareConnectPhone("local");
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -38,7 +39,9 @@ public class Server {
     public static void prepareConnectPhone(String localAddr) throws Exception {
         new Thread(() -> {
             try {
-                boolean success = AdbExecTools.adbPush(new File("scrcpy-server.jar").getAbsolutePath());
+                String path = "/Volumes/2T/Mac/IdeaProjects/CloudPhoneProject/scrcpy/server/build/outputs/apk/debug/server-debug.apk";
+//                String path = "scrcpy-server.jar";
+                boolean success = AdbExecTools.adbPush(new File(path).getAbsolutePath());
                 if (!success) {
                     System.out.println("adb push fail");
                     return;
@@ -202,12 +205,39 @@ public class Server {
             System.out.println("没有找到websSocket数据");
             return;
         }
-        BinaryWebSocketFrame frame = new BinaryWebSocketFrame(data);
+        BinaryWebSocketFrame frame;
         if (isVideo) {
+            data.skipBytes(8);
+            byte yuvType = data.readByte();
+            if (yuvType == SocketConstants.TYPE_YUV420SP) {
+                int area = data.readInt();
+                byte[] yuv420spData = new byte[data.readableBytes()];
+                data.readBytes(yuv420spData);
+                frame = new BinaryWebSocketFrame(Unpooled.wrappedBuffer(yuv420spToYuv420P(yuv420spData, area)));
+            } else if (yuvType == SocketConstants.TYPE_YUV420P){
+                data.skipBytes(4);
+                frame = new BinaryWebSocketFrame(data);
+            } else {
+                System.out.println("不支持的yuv420格式，yuvType = " + yuvType);
+                return;
+            }
             webChannelData.writeVideo(frame);
         } else {
+            frame = new BinaryWebSocketFrame(data);
             webChannelData.writeControl(frame);
         }
+    }
+
+    private static byte[] yuv420spToYuv420P(byte[] yuv420spData, int area) {
+        byte[] yuv420pData = new byte[area * 3 / 2];
+        int ySize = area;
+        System.arraycopy(yuv420spData, 0, yuv420pData, 0, ySize);   //拷贝 Y 分量
+
+        for (int j = 0, i = 0; j < ySize / 2; j += 2, i++) {
+            yuv420pData[ySize + i] = yuv420spData[ySize + j];   //U 分量
+            yuv420pData[ySize * 5 / 4 + i] = yuv420spData[ySize + j + 1];   //V 分量
+        }
+        return yuv420pData;
     }
 
     public static void writeAppControlSocket(String webLocalAddr, Object data) {

@@ -46,8 +46,8 @@ public class WebServerHandler extends SimpleChannelInboundHandler<Object> {
         }
         if (frame instanceof TextWebSocketFrame) {
             // 返回应答消息
-            String request = ((TextWebSocketFrame) frame).text();
-            System.out.println("服务端收到：" + request);
+//            String request = ((TextWebSocketFrame) frame).text();
+//            System.out.println("服务端收到：" + request);
 //            PingWebSocketFrame webSocketFrame = new PingWebSocketFrame();
 //            TextWebSocketFrame webSocketFrame = new TextWebSocketFrame("hello, websocket, too.");
 //            ctx.channel().writeAndFlush(webSocketFrame);
@@ -59,7 +59,7 @@ public class WebServerHandler extends SimpleChannelInboundHandler<Object> {
         }
         if (frame instanceof BinaryWebSocketFrame) {
             ByteBuf content = frame.content();
-            System.out.println("服务端收到二进制数据：" + content);
+//            System.out.println("服务端收到二进制数据：" + content);
             ByteBuf data = Unpooled.buffer(content.readableBytes() + 2 + 4);
             data.writeShort(SocketConstants.DATA_BEGIN);
             data.writeInt(content.readableBytes());

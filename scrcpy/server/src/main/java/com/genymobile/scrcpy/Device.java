@@ -79,19 +79,19 @@ public final class Device {
         // - scale down the great side of the screen to maxSize (if necessary);
         // - scale down the other side so that the aspect ratio is preserved;
         // - round this value to the nearest multiple of 8 (H.264 only accepts multiples of 8)
-        w &= ~7; // in case it's not a multiple of 8
-        h &= ~7;
+        w &= ~15; // in case it's not a multiple of 8
+        h &= ~15;
         if (maxSize > 0) {
-            if (BuildConfig.DEBUG && maxSize % 8 != 0) {
-                throw new AssertionError("Max size must be a multiple of 8");
+            if (BuildConfig.DEBUG && maxSize % 16 != 0) {
+                throw new AssertionError("Max size must be a multiple of 16");
             }
             boolean portrait = h > w;
             int major = portrait ? h : w;
             int minor = portrait ? w : h;
             if (major > maxSize) {
                 int minorExact = minor * maxSize / major;
-                // +4 to round the value to the nearest multiple of 8
-                minor = (minorExact + 4) & ~7;
+                // +4 to round the value to the nearest multiple of 16
+                minor = (minorExact + 4) & ~15;
                 major = maxSize;
             }
             w = portrait ? minor : major;
