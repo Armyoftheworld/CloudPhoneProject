@@ -1,6 +1,7 @@
 package com.army.scrcpy.server;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.socket.SocketChannel;
@@ -21,7 +22,7 @@ public class ClientHandler extends SimpleChannelInboundHandler<ByteBuf> {
     protected void channelRead0(ChannelHandlerContext ctx, ByteBuf byteBuf) {
         String addr = ctx.channel().remoteAddress().toString();
         byte type = byteBuf.readByte();
-        Server.writeWebSocket(addr, byteBuf, type == SocketConstants.VIDEOSTREAM_TYPE);
+        Server.writeWebSocket(addr, Unpooled.copiedBuffer(byteBuf), type == SocketConstants.VIDEOSTREAM_TYPE);
     }
 
 
